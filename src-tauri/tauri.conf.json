@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "cubex",
+  "productName": "cubexlauncher",
   "version": "0.1.0",
-  "identifier": "com.cubex.app",
+  "identifier": "com.cubexlauncher.app",
   "build": {
     "beforeDevCommand": "pnpm dev",
     "devUrl": "http://localhost:1420",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "cubex",
+        "title": "CubeX Launcher",
         "width": 800,
         "height": 600
       }
