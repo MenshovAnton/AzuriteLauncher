@@ -6,3 +6,8 @@ form {
 input {
   margin-bottom: 10px;
 }
+
+select {
+  margin-bottom: 10px;
+  width: 250px;
+}

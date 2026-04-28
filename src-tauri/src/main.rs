@@ -2,10 +2,11 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod launch_minecraft;
+mod minecraft_versions_control;
 
 fn main() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![start])
+        .invoke_handler(tauri::generate_handler![start, minecraft_versions_control::get_versions])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 
@@ -13,11 +14,14 @@ fn main() {
 }
 
 #[tauri::command]
-fn start(dir: String, ver: String) {
-    let cfg = launch_minecraft::LaunchConfig{java_path: "C:/Users/Waysoon/AppData/Roaming/PrismLauncher/java/java-runtime-epsilon/bin/javaw.exe".to_string(),
-        game_dir: dir,
-        version: ver,
-        username: "Test".to_string()};
+async fn start(jvm_path: String, game_directory: String, game_version: String, username: String) {
+    let launch_config = launch_minecraft::LaunchConfig
+    {
+        java_path: jvm_path,
+        game_dir: game_directory,
+        version: game_version,
+        username
+    };
 
-    launch_minecraft::launch(cfg).expect("failed to launch!");
+    tokio::task::spawn_blocking(move || {launch_minecraft::launch(launch_config).expect("launch failed");});
 }
