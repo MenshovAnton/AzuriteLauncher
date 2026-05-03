@@ -4,7 +4,6 @@ import {useEffect, useState} from "react";
 function App() {
     const [versions, setVersions] = useState<string[]>([]);
     const [selectedVersion, setSelected] = useState("");
-    const [gamePath, setGamePath] = useState("");
     const [jvmPath, setJVMPath] = useState("");
     const [username, setUsername] = useState("");
 
@@ -14,8 +13,7 @@ function App() {
 
     async function play() {
         await invoke<string>("start", { 
-            jvmPath: jvmPath, 
-            gameDirectory: gamePath, 
+            jvmPath: jvmPath,
             gameVersion: selectedVersion, 
             username: username 
         });
@@ -31,18 +29,6 @@ function App() {
                             <option key={v} value={v}>{v}</option>
                         ))}
                     </select>
-                </label>
-
-                <label htmlFor="minecraftDirectory">
-                    .minecraft path:
-                    <input
-                        value={gamePath}
-                        onChange={(e) => setGamePath(e.target.value)}
-                        type="text"
-                        id="minecraftDirectory"
-                        name="ver"
-                        required
-                    />
                 </label>
 
                 <label htmlFor="javaDirectory">
@@ -70,7 +56,7 @@ function App() {
                 </label>
             </form>
 
-            <button onClick={play}>Играть</button>
+            <button onClick={play}>Play</button>
         </div>
     );
 }
