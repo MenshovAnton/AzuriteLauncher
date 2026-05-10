@@ -3,13 +3,13 @@
 use directories::BaseDirs;
 
 mod launch_minecraft;
-mod minecraft_download;
+mod minecraft_manager;
 
 fn main() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![start, minecraft_download::get_versions])
+        .invoke_handler(tauri::generate_handler![start, minecraft_manager::get_versions])
         .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .expect("Error while running tauri application.");
 
     cubexlauncher_lib::run()
 }
@@ -24,8 +24,8 @@ async fn start(jvm_path: String, game_version: String, username: String) {
         username
     };
 
-    println!("launching minecraft {}", launch_config.version);
-    launch_minecraft::launch(launch_config).await.expect("launch failed");
+    println!("Start launching Minecraft {}.", launch_config.version);
+    launch_minecraft::launch(launch_config).await.expect("Launch Minecraft failed.");
 }
 
 fn app_directory() -> String {

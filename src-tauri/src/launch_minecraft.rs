@@ -1,15 +1,17 @@
-use std::fs;
-use std::path::{Path, PathBuf};
-use std::process::Command;
-use std::fs::File;
+use std::{
+    fs,
+    fs::File,
+    path::{Path, PathBuf},
+    process::Command,
+    io
+};
 use anyhow::Result;
 use serde::Deserialize;
 use zip::ZipArchive;
 use rayon::prelude::*;
-use std::io;
 use serde_json::Value;
 
-use crate::minecraft_download;
+use crate::minecraft_manager;
 
 #[derive(Debug, Deserialize)]
 struct VersionJson {
@@ -51,7 +53,8 @@ pub struct LaunchConfig {
 }
 
 pub async fn launch(cfg: LaunchConfig) -> Result<()> {
-    validate_client(&cfg.version, &cfg.game_dir).await;
+    let downloader = minecraft_manager::MinecraftDownloader::new(&cfg.game_dir);
+    downloader.install_version(cfg.version.as_str()).await?;
 
     let libs_dir = format!("{}/libraries", cfg.game_dir);
     let natives_dir = format!("{}/cache/launch/natives", cfg.game_dir);
@@ -59,7 +62,7 @@ pub async fn launch(cfg: LaunchConfig) -> Result<()> {
 
     extract_natives(Path::new(&libs_dir), Path::new(&natives_dir), Path::new(&format!("{}/versions/{}/{}.json",
                                                                                       cfg.game_dir, cfg.version, cfg.version)))
-        .expect("couldn't extract natives");
+        .expect("Couldn't extract natives!");
 
     let data = fs::read_to_string(&format!("{}\\versions\\{}\\{}.json", cfg.game_dir, cfg.version, cfg.version))?;
     let version_json: Value = serde_json::from_str(&data)?;
@@ -152,15 +155,18 @@ pub fn build_launch_args(
 
     args.push(main_class.to_string());
 
+    let assets_index = version_json["assetIndex"]["id"].as_str().unwrap();
+    println!("{}", assets_index);
+
     if let Some(legacy_args) = version_json["minecraftArguments"].as_str() {
-        let mut parsed = parse_legacy_args(legacy_args);
+        let parsed = parse_legacy_args(legacy_args);
 
         for arg in parsed {
             args.push(replace_legacy_vars(
                 &arg,
                 &format!("{}\\instance\\{}\\minecraft", game_dir, version_name),
                 assets_dir,
-                natives_dir,
+                assets_index,
                 version_name,
                 auth_player_name,
                 auth_uuid,
@@ -176,6 +182,7 @@ pub fn build_launch_args(
                     val,
                     &format!("{}\\instance\\{}\\minecraft", game_dir, version_name),
                     assets_dir,
+                    assets_index,
                     version_name,
                     auth_player_name,
                     auth_uuid,
@@ -240,7 +247,8 @@ fn replace_vars(arg: &str,
                 assets_dir: &str,
                 natives_dir: &str,
                 version: &str,
-                classpath: &str) -> String {
+                classpath: &str)
+    -> String {
     arg.replace("${natives_directory}", natives_dir)
         .replace("${launcher_name}", "CubeX Launcher")
         .replace("${launcher_version}", "1.0")
@@ -251,16 +259,15 @@ fn replace_vars(arg: &str,
         .replace("${classpath}", classpath)
 }
 
-fn replace_legacy_vars(
-    arg: &str,
-    game_dir: &str,
-    assets_dir: &str,
-    natives_dir: &str,
-    version: &str,
-    username: &str,
-    uuid: &str,
-    token: &str,
-) -> String {
+fn replace_legacy_vars(arg: &str,
+                       game_dir: &str,
+                       assets_dir: &str,
+                       assets_index: &str,
+                       version: &str,
+                       username: &str,
+                       uuid: &str,
+                       token: &str, ) -> String
+{
     arg.replace("${auth_player_name}", username)
         .replace("${auth_uuid}", uuid)
         .replace("${auth_access_token}", token)
@@ -268,24 +275,24 @@ fn replace_legacy_vars(
         .replace("${version_name}", version)
         .replace("${game_directory}", game_dir)
         .replace("${assets_root}", assets_dir)
-        .replace("${assets_index_name}", version)
+        .replace("${assets_index_name}", assets_index)
         .replace("${game_assets}", assets_dir)
         .replace("${user_type}", "legacy")
         .replace("${version_type}", "release")
         .replace("${user_properties}", "{}")
 }
 
-fn replace_game_vars(
-    arg: &str,
-    game_dir: &str,
-    assets_dir: &str,
-    version: &str,
-    username: &str,
-    uuid: &str,
-    token: &str,
-    client_id: &str,
-    xuid: &str,
-) -> String {
+fn replace_game_vars(arg: &str,
+                     game_dir: &str,
+                     assets_dir: &str,
+                     assets_index: &str,
+                     version: &str,
+                     username: &str,
+                     uuid: &str,
+                     token: &str,
+                     client_id: &str,
+                     xuid: &str, ) -> String
+{
     arg.replace("${auth_player_name}", username)
         .replace("${auth_uuid}", uuid)
         .replace("${auth_access_token}", token)
@@ -294,7 +301,7 @@ fn replace_game_vars(
         .replace("${auth_xuid}", xuid)
         .replace("${game_directory}", game_dir)
         .replace("${assets_root}", assets_dir)
-        .replace("${assets_index_name}", version)
+        .replace("${assets_index_name}", assets_index)
         .replace("${user_type}", "msa")
         .replace("${version_type}", "release")
         .replace("--demo", "")
@@ -307,41 +314,10 @@ fn get_classpath_separator() -> &'static str {
         ":"
     }
 }
-
-async fn validate_client(version: &String, dir: &String) {
-    println!("validating client");
-
-    let base = Path::new(dir);
-
-    let version_dir = base.join("versions").join(version);
-
-    let json = version_dir.join(format!("{}.json", version));
-    let jar  = version_dir.join(format!("{}.jar", version));
-
-    let version_json = minecraft_download::download_version_json(version, dir).await.unwrap();
-
-    if !file_ok(&json) || !file_ok(&jar) {
-        println!("client not found");
-        minecraft_download::download_client(version, dir, &version_json).await.expect("couldn't download minecraft client");
-        minecraft_download::download_libraries(version, dir, &version_json).await.expect("couldn't download libraries");
-    }
-
-    let asset_index_file = base
-        .join("assets")
-        .join("indexes")
-        .join(format!("{}.json", version));
-
-    if !file_ok(&asset_index_file) {
-        println!("assets not found");
-        minecraft_download::download_assets(version, dir, &version_json).await.expect("couldn't download minecraft assets");
-    }
-}
-
-fn file_ok(path: &Path) -> bool {
-    path.exists() && path.is_file() && fs::metadata(path).map(|m| m.len() > 0).unwrap_or(false)
-}
-
-pub fn extract_natives(libs_dir: &Path, natives_dir: &Path, version_json_path: &Path, ) -> io::Result<()> {
+pub fn extract_natives(libs_dir: &Path,
+                       natives_dir: &Path,
+                       version_json_path: &Path, ) -> io::Result<()>
+{
     if !natives_dir.exists() {
         fs::create_dir_all(natives_dir)?;
     } else {
