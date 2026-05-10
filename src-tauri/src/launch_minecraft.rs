@@ -1,13 +1,13 @@
-use std::{fs};
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::fs::File;
-use std::io::Write;
 use anyhow::Result;
 use serde::Deserialize;
 use zip::ZipArchive;
 use rayon::prelude::*;
 use std::io;
+use serde_json::Value;
 
 use crate::minecraft_download;
 
@@ -35,7 +35,6 @@ struct OsRule {
 
 #[derive(Debug, Deserialize)]
 struct Downloads {
-    artifact: Option<Artifact>,
     classifiers: Option<std::collections::HashMap<String, Artifact>>,
 }
 
@@ -43,7 +42,6 @@ struct Downloads {
 struct Artifact {
     path: String,
 }
-
 
 pub struct LaunchConfig {
     pub java_path: String,
@@ -55,64 +53,29 @@ pub struct LaunchConfig {
 pub async fn launch(cfg: LaunchConfig) -> Result<()> {
     validate_client(&cfg.version, &cfg.game_dir).await;
 
-    let version_dir = format!("{}/versions/{}", cfg.game_dir, cfg.version);
-    let client_jar = format!("{}/{}.jar", version_dir, cfg.version);
     let libs_dir = format!("{}/libraries", cfg.game_dir);
     let natives_dir = format!("{}/cache/launch/natives", cfg.game_dir);
+    let assets_dir = format!("{}/assets", cfg.game_dir);
 
-    extract_natives(Path::new(&libs_dir), Path::new(&natives_dir), Path::new(&format!("{}/versions/{}/{}.json", cfg.game_dir, cfg.version, cfg.version))).expect("couldn't extract natives");
+    extract_natives(Path::new(&libs_dir), Path::new(&natives_dir), Path::new(&format!("{}/versions/{}/{}.json",
+                                                                                      cfg.game_dir, cfg.version, cfg.version)))
+        .expect("couldn't extract natives");
 
-    let data = fs::read_to_string(&format!("{}/versions/{}/{}.json", cfg.game_dir, cfg.version, cfg.version))?;
-    let version: VersionJson = serde_json::from_str(&data)?;
-
-    let classpath = build_classpath(&libs_dir, &client_jar, &version)?;
+    let data = fs::read_to_string(&format!("{}\\versions\\{}\\{}.json", cfg.game_dir, cfg.version, cfg.version))?;
+    let version_json: Value = serde_json::from_str(&data)?;
 
     let uuid = generate_offline_uuid(&cfg.username);
 
-    let args_path = format!("{}/launch_args.txt", cfg.game_dir);
-
-    let content = build_args_file(&classpath, &natives_dir, &cfg, &uuid);
-    write_args_file(&args_path, content)?;
+    let launch_args = build_launch_args(&version_json, &cfg.game_dir, &assets_dir, &natives_dir, &cfg.version,
+                                        &cfg.username, &uuid, "0");
+    println!("{}", launch_args.join("\n"));
 
     Command::new(&cfg.java_path)
-        .arg(format!("@{}", args_path))
+        .args(&launch_args)
         .spawn()?
         .wait()?;
 
     Ok(())
-}
-
-fn build_classpath(libs_dir: &str, client_jar: &str, version: &VersionJson) -> std::io::Result<String> {
-    let mut jars = Vec::new();
-
-    for lib in &version.libraries {
-        if !lib_is_allowed(&lib.rules) {
-            continue;
-        }
-
-        if let Some(downloads) = &lib.downloads {
-            if let Some(artifact) = &downloads.artifact {
-                let full_path = format!("{}/{}", libs_dir, artifact.path);
-                if let Ok(p) = canonical(&full_path) {
-                    jars.push(p);
-                } else {
-                    println!("Missing file: {}", full_path);
-                }
-            }
-        }
-    }
-
-    jars.push(canonical(client_jar)?);
-
-    let sep = if cfg!(windows) { ";" } else { ":" };
-    Ok(jars.join(sep))
-}
-
-fn canonical(path: &str) -> std::io::Result<String> {
-    Ok(PathBuf::from(path)
-        .canonicalize()?
-        .to_string_lossy()
-        .to_string())
 }
 
 // NOTE: This is a temporary measure for testing functionality.
@@ -136,95 +99,212 @@ fn generate_offline_uuid(username: &str) -> String {
     ).replace(['[', ']', ',', ' '], "")
 }
 
-fn write_args_file(path: &str, content: String) -> std::io::Result<()> {
-    let mut file = File::create(path)?;
-    file.write_all(content.as_bytes())?;
-    Ok(())
-}
+pub fn build_launch_args(
+    version_json: &Value,
+    game_dir: &str,
+    assets_dir: &str,
+    natives_dir: &str,
+    version_name: &str,
+    auth_player_name: &str,
+    auth_uuid: &str,
+    auth_access_token: &str,
+) -> Vec<String> {
+    let mut args = Vec::new();
 
-fn build_args_file(
-    classpath: &str,
-    natives: &str,
-    cfg: &LaunchConfig,
-    uuid: &str) -> String {
-    format!(
-        r#"-Xmx2G
-        -Xms1G
-        -Djava.library.path={}
-        -cp
-        {}
-        net.minecraft.client.main.Main
-        --username {}
-        --uuid {}
-        --accessToken offline
-        --version {}
-        --gameDir {}/instance/{}/minecraft/
-        --assetsDir {}/assets
-        --assetIndex {}
-        --userProperties {}
-        "#,
-        natives,
-        classpath,
-        cfg.username,
-        uuid,
-        cfg.version,
-        cfg.game_dir,
-        cfg.version,
-        cfg.game_dir,
-        cfg.version,
-        "{}"
-    )
-}
+    let mut classpath = Vec::new();
 
-fn lib_is_allowed(rules: &Option<Vec<Rule>>) -> bool {
-    let Some(rules) = rules else {
-        return true; // нет правил = разрешено
-    };
-
-    let mut allowed = false;
-
-    for rule in rules {
-        match rule.action.as_str() {
-            "allow" => {
-                if let Some(os) = &rule.os {
-                    if let Some(name) = &os.name {
-                        if name == get_current_os() {
-                            allowed = true;
-                        }
-                    } else {
-                        allowed = true;
-                    }
-                } else {
-                    allowed = true;
-                }
+    if let Some(libs) = version_json["libraries"].as_array() {
+        for lib in libs {
+            if !check_rules(lib) {
+                continue;
             }
 
-            "disallow" => {
-                if let Some(os) = &rule.os {
-                    if let Some(name) = &os.name {
-                        if name == get_current_os() {
-                            return false;
-                        }
-                    }
-                }
+            if lib.get("natives").is_some() {
+                continue;
             }
 
-            _ => {}
+            if let Some(artifact) = lib["downloads"].get("artifact") {
+                if let Some(path) = artifact["path"].as_str() {
+                    classpath.push(format!("{}\\libraries\\{}", game_dir, path));
+                }
+            }
         }
     }
 
-    allowed
+    let client_jar = format!("{}\\versions\\{}\\{}.jar", game_dir, version_name, version_name);
+    classpath.push(client_jar);
+
+    if let Some(jvm_args) = version_json["arguments"]["jvm"].as_array() {
+        for arg in jvm_args {
+            if let Some(val) = parse_arg(arg) {
+                args.push(replace_vars(val, game_dir, assets_dir, natives_dir, version_name, &classpath.join(get_classpath_separator())));
+            }
+        }
+    } else {
+        args.push(format!("-Djava.library.path={}", natives_dir));
+        args.push(String::from("-cp"));
+        args.push(format!("{}", &classpath.join(get_classpath_separator())));
+    }
+
+    let main_class = version_json["mainClass"]
+        .as_str()
+        .unwrap_or("net.minecraft.client.main.Main");
+
+    args.push(main_class.to_string());
+
+    if let Some(legacy_args) = version_json["minecraftArguments"].as_str() {
+        let mut parsed = parse_legacy_args(legacy_args);
+
+        for arg in parsed {
+            args.push(replace_legacy_vars(
+                &arg,
+                &format!("{}\\instance\\{}\\minecraft", game_dir, version_name),
+                assets_dir,
+                natives_dir,
+                version_name,
+                auth_player_name,
+                auth_uuid,
+                auth_access_token,
+            ));
+        }
+    }
+
+    if let Some(game_args) = version_json["arguments"]["game"].as_array() {
+        for arg in game_args {
+            if let Some(val) = parse_arg(arg) {
+                args.push(replace_game_vars(
+                    val,
+                    &format!("{}\\instance\\{}\\minecraft", game_dir, version_name),
+                    assets_dir,
+                    version_name,
+                    auth_player_name,
+                    auth_uuid,
+                    auth_access_token,
+                    "0",
+                    "0"
+                ));
+            }
+        }
+    }
+
+    args
 }
 
-fn get_current_os() -> &'static str {
+fn parse_arg(arg: &Value) -> Option<&str> {
+    match arg {
+        Value::String(s) => Some(s),
+        Value::Object(obj) => {
+            if !check_rules(arg) {
+                return None;
+            }
+
+            obj["value"].as_str()
+        }
+        _ => None,
+    }
+}
+
+fn parse_legacy_args(arg_string: &str) -> Vec<String> {
+    arg_string
+        .split_whitespace()
+        .map(|s| s.to_string())
+        .collect()
+}
+
+fn check_rules(obj: &Value) -> bool {
+    if let Some(rules) = obj["rules"].as_array() {
+        for rule in rules {
+            let action = rule["action"].as_str().unwrap_or("disallow");
+
+            if let Some(os) = rule["os"]["name"].as_str() {
+                let current = std::env::consts::OS;
+
+                if os == "windows" && current != "windows" {
+                    return action == "disallow";
+                }
+                if os == "linux" && current != "linux" {
+                    return action == "disallow";
+                }
+                if os == "osx" && current != "macos" {
+                    return action == "disallow";
+                }
+            }
+        }
+    }
+
+    true
+}
+
+fn replace_vars(arg: &str,
+                game_dir: &str,
+                assets_dir: &str,
+                natives_dir: &str,
+                version: &str,
+                classpath: &str) -> String {
+    arg.replace("${natives_directory}", natives_dir)
+        .replace("${launcher_name}", "CubeX Launcher")
+        .replace("${launcher_version}", "1.0")
+        .replace("${classpath_separator}", get_classpath_separator())
+        .replace("${library_directory}", &format!("{}/libraries", game_dir))
+        .replace("${version_name}", version)
+        .replace("${assets_root}", assets_dir)
+        .replace("${classpath}", classpath)
+}
+
+fn replace_legacy_vars(
+    arg: &str,
+    game_dir: &str,
+    assets_dir: &str,
+    natives_dir: &str,
+    version: &str,
+    username: &str,
+    uuid: &str,
+    token: &str,
+) -> String {
+    arg.replace("${auth_player_name}", username)
+        .replace("${auth_uuid}", uuid)
+        .replace("${auth_access_token}", token)
+        .replace("${auth_session}", token)
+        .replace("${version_name}", version)
+        .replace("${game_directory}", game_dir)
+        .replace("${assets_root}", assets_dir)
+        .replace("${assets_index_name}", version)
+        .replace("${game_assets}", assets_dir)
+        .replace("${user_type}", "legacy")
+        .replace("${version_type}", "release")
+        .replace("${user_properties}", "{}")
+}
+
+fn replace_game_vars(
+    arg: &str,
+    game_dir: &str,
+    assets_dir: &str,
+    version: &str,
+    username: &str,
+    uuid: &str,
+    token: &str,
+    client_id: &str,
+    xuid: &str,
+) -> String {
+    arg.replace("${auth_player_name}", username)
+        .replace("${auth_uuid}", uuid)
+        .replace("${auth_access_token}", token)
+        .replace("${version_name}", version)
+        .replace("${clientid}", client_id)
+        .replace("${auth_xuid}", xuid)
+        .replace("${game_directory}", game_dir)
+        .replace("${assets_root}", assets_dir)
+        .replace("${assets_index_name}", version)
+        .replace("${user_type}", "msa")
+        .replace("${version_type}", "release")
+        .replace("--demo", "")
+}
+
+fn get_classpath_separator() -> &'static str {
     if cfg!(windows) {
-        "windows"
-    } else if cfg!(target_os = "linux") {
-        "linux"
-    } else if cfg!(target_os = "macos") {
-        "osx"
+        ";"
     } else {
-        "unknown"
+        ":"
     }
 }
 
@@ -253,7 +333,7 @@ async fn validate_client(version: &String, dir: &String) {
 
     if !file_ok(&asset_index_file) {
         println!("assets not found");
-        minecraft_download::download_assets(version, dir, &version_json).await.expect("couldn't download launch minecraft assets");
+        minecraft_download::download_assets(version, dir, &version_json).await.expect("couldn't download minecraft assets");
     }
 }
 
@@ -266,6 +346,7 @@ pub fn extract_natives(libs_dir: &Path, natives_dir: &Path, version_json_path: &
         fs::create_dir_all(natives_dir)?;
     } else {
         fs::remove_dir_all(natives_dir)?;
+        fs::create_dir_all(natives_dir)?;
     }
 
     let json_str = fs::read_to_string(version_json_path)?;

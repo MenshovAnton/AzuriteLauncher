@@ -1,7 +1,7 @@
 use reqwest;
 use std::fs::{self, File};
-use std::io::{Write};
-use std::path::{Path};
+use std::io::Write;
+use std::path::Path;
 use futures::stream::{self, StreamExt};
 use tokio::io::AsyncWriteExt;
 
@@ -74,10 +74,10 @@ pub async fn download_client(version: &String, dir: &String, version_json: &serd
         .await
         .map_err(|e| e.to_string())?;
 
-    let dir = format!("{}/versions/{}", dir, version);
+    let dir = format!("{}\\versions\\{}", dir, version);
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
 
-    let file_path = format!("{}/{}.jar", dir, version);
+    let file_path = format!("{}\\{}.jar", dir, version);
     let mut file = tokio::fs::File::create(&file_path)
         .await
         .map_err(|e| e.to_string())?;
@@ -93,7 +93,7 @@ pub async fn download_client(version: &String, dir: &String, version_json: &serd
     Ok("successful downloaded client".to_string())
 }
 
-pub async fn download_assets(version: &String, dir: &String, version_json: &serde_json::Value) -> Result<String, Box<dyn std::error::Error>> {
+pub async fn download_assets(version: &String, dir: &String, version_json: &serde_json::Value) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     println!("downloading assets for {}", version);
 
     let asset_index_url = version_json["assetIndex"]["url"]
@@ -110,9 +110,9 @@ pub async fn download_assets(version: &String, dir: &String, version_json: &serd
 
     download_assets_parallel(objects.clone(), dir).await?;
 
-    let index_path = format!("{}/assets/indexes/{}.json", dir, version);
+    let index_path = format!("{}\\assets\\indexes\\{}.json", dir, version);
 
-    fs::create_dir_all(format!("{}/assets/indexes", dir))?;
+    fs::create_dir_all(format!("{}\\assets\\indexes", dir))?;
 
     tokio::fs::write(
         &index_path,
@@ -124,7 +124,7 @@ pub async fn download_assets(version: &String, dir: &String, version_json: &serd
 }
 
 async fn download_assets_parallel(objects: serde_json::Map<String, serde_json::Value>, dir: &String) -> Result<(), String> {
-    let base_path = &format!("{}/assets/objects", dir);
+    let base_path = &format!("{}\\assets\\objects", dir);
     fs::create_dir_all(base_path).map_err(|e| e.to_string())?;
 
     stream::iter(objects.into_iter())
@@ -193,7 +193,7 @@ async fn download_libraries_parallel(libraries: Vec<serde_json::Value>, client: 
                     let url = artifact["url"].as_str().unwrap();
                     let path = artifact["path"].as_str().unwrap();
 
-                    let full_path = format!("{}/libraries/{}", dir, path);
+                    let full_path = format!("{}\\libraries\\{}", dir, path);
 
                     write_libraries(&full_path, &client, url).await?;
                 }
@@ -211,7 +211,7 @@ async fn download_libraries_parallel(libraries: Vec<serde_json::Value>, client: 
                         let url = native["url"].as_str().unwrap();
                         let path = native["path"].as_str().unwrap();
 
-                        let full_path = format!("{}/libraries/{}", dir, path);
+                        let full_path = format!("{}\\libraries\\{}", dir, path);
 
                         write_libraries(&full_path, &client, url).await?;
                     }
