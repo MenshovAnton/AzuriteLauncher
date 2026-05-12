@@ -12,6 +12,7 @@ use rayon::prelude::*;
 use serde_json::Value;
 
 use crate::minecraft_manager;
+use crate::path_manager::Paths;
 
 #[derive(Debug, Deserialize)]
 struct VersionJson {
@@ -47,31 +48,29 @@ struct Artifact {
 
 pub struct LaunchConfig {
     pub java_path: String,
-    pub game_dir: String,
+    pub root: PathBuf,
     pub version: String,
     pub username: String,
 }
 
 pub async fn launch(cfg: LaunchConfig) -> Result<()> {
-    let downloader = minecraft_manager::MinecraftDownloader::new(&cfg.game_dir);
+    let paths = Paths::new(cfg.root);
+
+    let downloader = minecraft_manager::MinecraftDownloader::new(paths.clone());
     downloader.install_version(cfg.version.as_str()).await?;
 
-    let libs_dir = format!("{}/libraries", cfg.game_dir);
-    let natives_dir = format!("{}/cache/launch/natives", cfg.game_dir);
-    let assets_dir = format!("{}/assets", cfg.game_dir);
+    let version_json_path = paths.versions.join(&cfg.version).join(format!("{}.json", cfg.version));
 
-    extract_natives(Path::new(&libs_dir), Path::new(&natives_dir), Path::new(&format!("{}/versions/{}/{}.json",
-                                                                                      cfg.game_dir, cfg.version, cfg.version)))
+    extract_natives(&paths.libraries, &paths.native_libraries, &version_json_path)
         .expect("Couldn't extract natives!");
 
-    let data = fs::read_to_string(&format!("{}\\versions\\{}\\{}.json", cfg.game_dir, cfg.version, cfg.version))?;
+    let data = fs::read_to_string(version_json_path)?;
     let version_json: Value = serde_json::from_str(&data)?;
 
     let uuid = generate_offline_uuid(&cfg.username);
 
-    let launch_args = build_launch_args(&version_json, &cfg.game_dir, &assets_dir, &natives_dir, &cfg.version,
-                                        &cfg.username, &uuid, "0");
-    println!("{}", launch_args.join("\n"));
+    let launch_args = build_launch_args(&version_json, paths, &cfg.version, &cfg.username, &uuid, "0");
+    println!("JVM args:\n{}", launch_args.join("\n"));
 
     Command::new(&cfg.java_path)
         .args(&launch_args)
@@ -104,9 +103,7 @@ fn generate_offline_uuid(username: &str) -> String {
 
 pub fn build_launch_args(
     version_json: &Value,
-    game_dir: &str,
-    assets_dir: &str,
-    natives_dir: &str,
+    paths: Paths,
     version_name: &str,
     auth_player_name: &str,
     auth_uuid: &str,
@@ -128,23 +125,28 @@ pub fn build_launch_args(
 
             if let Some(artifact) = lib["downloads"].get("artifact") {
                 if let Some(path) = artifact["path"].as_str() {
-                    classpath.push(format!("{}\\libraries\\{}", game_dir, path));
+                    classpath.push(paths.libraries.join(PathBuf::from(path)).to_string_lossy().into_owned());
                 }
             }
         }
     }
 
-    let client_jar = format!("{}\\versions\\{}\\{}.jar", game_dir, version_name, version_name);
-    classpath.push(client_jar);
+    let client_jar = paths.versions.join(&version_name).join(format!("{}.jar", version_name));
+    classpath.push(client_jar.to_string_lossy().into_owned());
 
     if let Some(jvm_args) = version_json["arguments"]["jvm"].as_array() {
         for arg in jvm_args {
             if let Some(val) = parse_arg(arg) {
-                args.push(replace_vars(val, game_dir, assets_dir, natives_dir, version_name, &classpath.join(get_classpath_separator())));
+                args.push(replace_vars(val,
+                                       paths.assets.to_str().unwrap(),
+                                       paths.libraries.to_str().unwrap(),
+                                       paths.native_libraries.to_str().unwrap(),
+                                       version_name,
+                                       &classpath.join(get_classpath_separator())));
             }
         }
     } else {
-        args.push(format!("-Djava.library.path={}", natives_dir));
+        args.push(format!("-Djava.library.path={}", paths.native_libraries.to_str().unwrap()));
         args.push(String::from("-cp"));
         args.push(format!("{}", &classpath.join(get_classpath_separator())));
     }
@@ -158,14 +160,15 @@ pub fn build_launch_args(
     let assets_index = version_json["assetIndex"]["id"].as_str().unwrap();
     println!("{}", assets_index);
 
+
     if let Some(legacy_args) = version_json["minecraftArguments"].as_str() {
         let parsed = parse_legacy_args(legacy_args);
 
         for arg in parsed {
             args.push(replace_legacy_vars(
                 &arg,
-                &format!("{}\\instance\\{}\\minecraft", game_dir, version_name),
-                assets_dir,
+                paths.instances.join(version_name).join("minecraft").to_str().unwrap(),
+                paths.assets.to_str().unwrap(),
                 assets_index,
                 version_name,
                 auth_player_name,
@@ -180,8 +183,8 @@ pub fn build_launch_args(
             if let Some(val) = parse_arg(arg) {
                 args.push(replace_game_vars(
                     val,
-                    &format!("{}\\instance\\{}\\minecraft", game_dir, version_name),
-                    assets_dir,
+                    paths.instances.join(version_name).join("minecraft").to_str().unwrap(),
+                    paths.assets.to_str().unwrap(),
                     assets_index,
                     version_name,
                     auth_player_name,
@@ -243,17 +246,17 @@ fn check_rules(obj: &Value) -> bool {
 }
 
 fn replace_vars(arg: &str,
-                game_dir: &str,
                 assets_dir: &str,
+                libraries_dir: &str,
                 natives_dir: &str,
                 version: &str,
                 classpath: &str)
-    -> String {
+                -> String {
     arg.replace("${natives_directory}", natives_dir)
         .replace("${launcher_name}", "CubeX Launcher")
         .replace("${launcher_version}", "1.0")
         .replace("${classpath_separator}", get_classpath_separator())
-        .replace("${library_directory}", &format!("{}/libraries", game_dir))
+        .replace("${library_directory}", libraries_dir)
         .replace("${version_name}", version)
         .replace("${assets_root}", assets_dir)
         .replace("${classpath}", classpath)

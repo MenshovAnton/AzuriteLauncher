@@ -4,6 +4,7 @@ use directories::BaseDirs;
 
 mod launch_minecraft;
 mod minecraft_manager;
+mod path_manager;
 
 fn main() {
     tauri::Builder::default()
@@ -19,7 +20,7 @@ async fn start(jvm_path: String, game_version: String, username: String) {
     let launch_config = launch_minecraft::LaunchConfig
     {
         java_path: jvm_path,
-        game_dir: app_directory(),
+        root: path_manager::get_app_directory(),
         version: game_version,
         username
     };

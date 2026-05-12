@@ -14,6 +14,7 @@ use tokio::{
     sync::Semaphore,
     time::{sleep, Duration},
 };
+use crate::path_manager::Paths;
 
 #[derive(Deserialize)]
 struct VersionManifest {
@@ -121,16 +122,15 @@ const ASSET_BASE: &str =
 const MAX_RETRIES: usize = 5;
 const PARALLEL_DOWNLOADS: usize = 16;
 
-#[derive(Clone)]
 pub struct MinecraftDownloader {
-    root: PathBuf,
+    paths: Paths,
     client: Client,
 }
 
 impl MinecraftDownloader {
-    pub fn new(root: impl Into<PathBuf>) -> Self {
+    pub fn new(paths: Paths) -> Self {
         Self {
-            root: root.into(),
+            paths: paths.into(),
             client: Client::builder()
                 .timeout(Duration::from_secs(30))
                 .connect_timeout(Duration::from_secs(10))
@@ -163,8 +163,8 @@ impl MinecraftDownloader {
             .await?;
 
         let version_dir = self
-            .root
-            .join("versions")
+            .paths
+            .versions
             .join(version_id);
 
         fs::create_dir_all(&version_dir).await?;
@@ -181,10 +181,7 @@ impl MinecraftDownloader {
         if let Some(client) = &version_json.downloads.client {
             tasks.push(DownloadTask {
                 url: client.url.clone(),
-                path: self
-                    .root
-                    .join("versions")
-                    .join(&version_json.id)
+                path: version_dir
                     .join(format!("{}.jar", version_json.id)),
                 sha1: Some(client.sha1.clone()),
             });
@@ -200,7 +197,7 @@ impl MinecraftDownloader {
                 if let Some(artifact) = &downloads.artifact {
                     tasks.push(DownloadTask {
                         url: artifact.url.clone(),
-                        path: self.root.join("libraries").join(&artifact.path),
+                        path: self.paths.libraries.join(&artifact.path),
                         sha1: Some(artifact.sha1.clone()),
                     });
                 }
@@ -209,7 +206,7 @@ impl MinecraftDownloader {
                     if let Some(native) = classifiers.get("natives-windows") {
                         tasks.push(DownloadTask {
                             url: native.url.clone(),
-                            path: self.root.join("libraries").join(&native.path),
+                            path: self.paths.libraries.join(&native.path),
                             sha1: Some(native.sha1.clone()),
                         });
                     }
@@ -230,8 +227,8 @@ impl MinecraftDownloader {
         let asset_index_id = &version_json.asset_index.id;
 
         let indexes_dir = self
-            .root
-            .join("assets")
+            .paths
+            .assets
             .join("indexes");
 
         fs::create_dir_all(&indexes_dir).await?;
@@ -255,8 +252,8 @@ impl MinecraftDownloader {
             );
 
             let path = self
-                .root
-                .join("assets")
+                .paths
+                .assets
                 .join("objects")
                 .join(&hash[..2])
                 .join(&hash);
