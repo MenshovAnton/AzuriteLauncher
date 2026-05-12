@@ -1,5 +1,4 @@
-# CubeX Launcher
-[![wakatime](https://wakatime.com/badge/user/62277cec-b176-4b72-9cd9-104664eb4a03/project/cb36aa55-9e14-4d0d-9204-3f6a38ce4f76.svg)](https://wakatime.com/badge/user/62277cec-b176-4b72-9cd9-104664eb4a03/project/cb36aa55-9e14-4d0d-9204-3f6a38ce4f76)
+# Azurite Launcher
 
 A powerful Minecraft launcher that combines modern features with an interface similar to the official launcher from the 1.10 era. Experience the nostalgia of the old launcher with features similar to Prism.
 
@@ -41,11 +40,14 @@ Backend:
 ## Status
 In Development. Early Stage.
 
+## Known issues
+- Linux and macOS builds are currently untested.
+
 ## Installation & Build
 
 ```bash
-git clone https://github.com/MenshovAnton/CubeXLauncher
-cd CubeXLauncher
+git clone https://github.com/MenshovAnton/AzuriteLauncher
+cd AzuriteLauncher
 pnpm install
 pnpm tauri dev
 ```
@@ -61,7 +63,8 @@ src-tauri/
 │  ├─ lib.rs 
 │  ├─ main.rs
 │  ├─ launch_minecraft.rs    # game launching logic
-│  └─ minecraft_manager.rs   # game downloading logic
+│  ├─ minecraft_manager.rs   # game downloading logic
+│  └─ path_manager.rs        # paths manager
 
 
 src/
@@ -71,5 +74,5 @@ src/
 ├─ main.tsx
 └─ vite-env.d.ts
 ```
-## License ![GitHub License](https://img.shields.io/github/license/MenshovAnton/CubeXLauncher)
+## License ![GitHub License](https://img.shields.io/github/license/MenshovAnton/AzuriteLauncher)
 This project is licensed under the GNU GPL v3.
