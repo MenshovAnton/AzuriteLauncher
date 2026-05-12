@@ -6,13 +6,16 @@ mod launch_minecraft;
 mod minecraft_manager;
 mod path_manager;
 
+pub const APP_NAME: &str = env!("CARGO_PKG_NAME");
+pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
+
 fn main() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![start, minecraft_manager::get_versions])
         .run(tauri::generate_context!())
         .expect("Error while running tauri application.");
 
-    cubexlauncher_lib::run()
+    azuritelauncher_lib::run()
 }
 
 #[tauri::command]
@@ -31,7 +34,7 @@ async fn start(jvm_path: String, game_version: String, username: String) {
 
 fn app_directory() -> String {
     let base = BaseDirs::new().unwrap();
-    let dir = base.data_dir().join("CubeXLauncher");
+    let dir = base.data_dir().join(APP_NAME);
 
     if !dir.exists() {
         std::fs::create_dir_all(&dir).unwrap();

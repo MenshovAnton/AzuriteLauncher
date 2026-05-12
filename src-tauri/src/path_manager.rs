@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use crate::APP_NAME;
 
 #[derive(Clone)]
 pub struct Paths {
@@ -27,13 +28,13 @@ pub fn get_app_directory() -> PathBuf {
     #[cfg(target_os = "windows")]
     {
         PathBuf::from(std::env::var("APPDATA").unwrap())
-            .join("CubeXLauncher")
+            .join(APP_NAME)
     }
 
     #[cfg(target_os = "linux")]
     {
         PathBuf::from(std::env::var("HOME").unwrap())
-            .join("CubeXLauncher")
+            .join(APP_NAME)
     }
 
     #[cfg(target_os = "macos")]
@@ -41,6 +42,6 @@ pub fn get_app_directory() -> PathBuf {
         PathBuf::from(std::env::var("HOME").unwrap())
             .join("Library")
             .join("Application Support")
-            .join("CubeXLauncher")
+            .join(APP_NAME)
     }
 }

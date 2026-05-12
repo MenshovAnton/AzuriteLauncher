@@ -3,6 +3,27 @@
 version = 4
 
 [[package]]
+name = "AzuriteLauncher"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "directories",
+ "futures",
+ "hex",
+ "md5",
+ "rayon",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha1",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-opener",
+ "tokio",
+ "zip",
+]
+
+[[package]]
 name = "adler2"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -764,27 +785,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7d5515a3834141de9eafb9717ad39eea8247b5674e6066c404e8c4b365d2a29e"
 dependencies = [
  "cmov",
-]
-
-[[package]]
-name = "cubexlauncher"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "directories",
- "futures",
- "hex",
- "md5",
- "rayon",
- "reqwest",
- "serde",
- "serde_json",
- "sha1",
- "tauri",
- "tauri-build",
- "tauri-plugin-opener",
- "tokio",
- "zip",
 ]
 
 [[package]]

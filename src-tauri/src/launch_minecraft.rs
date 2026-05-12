@@ -11,7 +11,7 @@ use zip::ZipArchive;
 use rayon::prelude::*;
 use serde_json::Value;
 
-use crate::minecraft_manager;
+use crate::{minecraft_manager, APP_NAME, APP_VERSION};
 use crate::path_manager::Paths;
 
 #[derive(Debug, Deserialize)]
@@ -253,8 +253,8 @@ fn replace_vars(arg: &str,
                 classpath: &str)
                 -> String {
     arg.replace("${natives_directory}", natives_dir)
-        .replace("${launcher_name}", "CubeX Launcher")
-        .replace("${launcher_version}", "1.0")
+        .replace("${launcher_name}", APP_NAME)
+        .replace("${launcher_version}", APP_VERSION)
         .replace("${classpath_separator}", get_classpath_separator())
         .replace("${library_directory}", libraries_dir)
         .replace("${version_name}", version)
