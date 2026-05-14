@@ -31,14 +31,3 @@ async fn start(jvm_path: String, game_version: String, username: String) {
     println!("Start launching Minecraft {}.", launch_config.version);
     launch_minecraft::launch(launch_config).await.expect("Launch Minecraft failed.");
 }
-
-fn app_directory() -> String {
-    let base = BaseDirs::new().unwrap();
-    let dir = base.data_dir().join(APP_NAME);
-
-    if !dir.exists() {
-        std::fs::create_dir_all(&dir).unwrap();
-    }
-
-    dir.to_str().unwrap().to_string()
-}

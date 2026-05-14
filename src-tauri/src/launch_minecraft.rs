@@ -64,7 +64,7 @@ pub async fn launch(cfg: LaunchConfig) -> Result<()> {
     extract_natives(&paths.libraries, &paths.native_libraries, &version_json_path)
         .expect("Couldn't extract natives!");
 
-    let data = fs::read_to_string(version_json_path)?;
+    let data = fs::read_to_string(&version_json_path)?;
     let version_json: Value = serde_json::from_str(&data)?;
 
     let uuid = generate_offline_uuid(&cfg.username);
@@ -134,6 +134,12 @@ pub fn build_launch_args(
     let client_jar = paths.versions.join(&version_name).join(format!("{}.jar", version_name));
     classpath.push(client_jar.to_string_lossy().into_owned());
 
+    let assets_index = version_json["assetIndex"]["id"].as_str().unwrap();
+
+    if assets_index == "pre-1.6" {
+        classpath.push(paths.instances.join(version_name).join("minecraft").join("resources").to_string_lossy().into_owned());
+    }
+
     if let Some(jvm_args) = version_json["arguments"]["jvm"].as_array() {
         for arg in jvm_args {
             if let Some(val) = parse_arg(arg) {
@@ -157,18 +163,34 @@ pub fn build_launch_args(
 
     args.push(main_class.to_string());
 
-    let assets_index = version_json["assetIndex"]["id"].as_str().unwrap();
-    println!("{}", assets_index);
-
-
     if let Some(legacy_args) = version_json["minecraftArguments"].as_str() {
         let parsed = parse_legacy_args(legacy_args);
+
+        let assets_path = &paths.assets;
+        let assets_dir;
+        if assets_index == "legacy" {
+            assets_dir = assets_path
+                .join("virtual")
+                .join("legacy")
+                .to_str()
+                .unwrap()
+                .to_string();
+        } else if assets_index == "pre-1.6" {
+            assets_dir = paths.instances
+                .join(version_name)
+                .join("minecraft")
+                .join("resources")
+                .to_str().unwrap()
+                .to_string();
+        } else {
+            assets_dir = assets_path.to_str().unwrap().to_string();
+        }
 
         for arg in parsed {
             args.push(replace_legacy_vars(
                 &arg,
                 paths.instances.join(version_name).join("minecraft").to_str().unwrap(),
-                paths.assets.to_str().unwrap(),
+                assets_dir.as_str(),
                 assets_index,
                 version_name,
                 auth_player_name,

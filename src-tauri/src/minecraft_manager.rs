@@ -18,22 +18,30 @@ use crate::path_manager::Paths;
 
 #[derive(Deserialize)]
 struct VersionManifest {
-    versions: Vec<ManifestVersion>,
+    versions: Vec<Manifest>,
 }
 
 #[derive(Deserialize)]
-struct ManifestVersion {
+struct Manifest {
     id: String,
     url: String,
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct VersionJson {
-    id: String,
+pub struct VersionJson {
+    pub id: String,
+    pub assets: Option<String>,
+    pub asset_index: Option<AssetIndexInfo>,
     downloads: Downloads,
     libraries: Vec<Library>,
-    asset_index: AssetIndex,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AssetIndexInfo {
+    pub id: String,
+    pub url: String,
 }
 
 #[derive(Deserialize)]
@@ -47,11 +55,11 @@ struct Download {
     url: String,
 }
 
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct AssetIndex {
-    id: String,
+#[derive(Clone)]
+struct DownloadTask {
     url: String,
+    path: PathBuf,
+    sha1: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -59,9 +67,9 @@ struct AssetIndexJson {
     objects: HashMap<String, AssetObject>,
 }
 
-#[derive(Deserialize)]
-struct AssetObject {
-    hash: String,
+#[derive(Debug, Deserialize)]
+pub struct AssetObject {
+    pub hash: String,
 }
 
 #[derive(Deserialize)]
@@ -169,7 +177,8 @@ impl MinecraftDownloader {
 
         fs::create_dir_all(&version_dir).await?;
 
-        let version_json_path = version_dir.join(format!("{version_id}.json"));
+        let version_json_path =
+            version_dir.join(format!("{version_id}.json"));
 
         fs::write(&version_json_path, &response_text).await?;
 
@@ -177,12 +186,14 @@ impl MinecraftDownloader {
             serde_json::from_str(&response_text)?;
 
         let mut tasks = Vec::<DownloadTask>::new();
-        
+
         if let Some(client) = &version_json.downloads.client {
             tasks.push(DownloadTask {
                 url: client.url.clone(),
-                path: version_dir
-                    .join(format!("{}.jar", version_json.id)),
+                path: version_dir.join(format!(
+                    "{}.jar",
+                    version_json.id
+                )),
                 sha1: Some(client.sha1.clone()),
             });
         }
@@ -193,55 +204,74 @@ impl MinecraftDownloader {
             }
 
             if let Some(downloads) = &lib.downloads {
-                
                 if let Some(artifact) = &downloads.artifact {
-                    tasks.push(DownloadTask {
-                        url: artifact.url.clone(),
-                        path: self.paths.libraries.join(&artifact.path),
-                        sha1: Some(artifact.sha1.clone()),
-                    });
+                    tasks.push(download_task(artifact, self.paths.clone()));
                 }
-                
+
                 if let Some(classifiers) = &downloads.classifiers {
-                    if let Some(native) = classifiers.get("natives-windows") {
-                        tasks.push(DownloadTask {
-                            url: native.url.clone(),
-                            path: self.paths.libraries.join(&native.path),
-                            sha1: Some(native.sha1.clone()),
-                        });
+                    let native_key = if cfg!(target_os = "windows") {
+                        "natives-windows"
+                    } else if cfg!(target_os = "linux") {
+                        "natives-linux"
+                    } else {
+                        "natives-osx"
+                    };
+
+                    if let Some(native) =
+                        classifiers.get(native_key)
+                    {
+                        tasks.push(download_task(native, self.paths.clone()));
                     }
                 }
             }
         }
-        
-        println!("Loading assets index...");
+
+        println!("Loading assets...");
+
+        let asset_index = version_json
+            .asset_index
+            .as_ref()
+            .ok_or_else(|| anyhow!("Missing asset index"))?;
 
         let asset_index_text = self
             .client
-            .get(&version_json.asset_index.url)
+            .get(&asset_index.url)
             .send()
             .await?
+            .error_for_status()?
             .text()
             .await?;
 
-        let asset_index_id = &version_json.asset_index.id;
-
-        let indexes_dir = self
-            .paths
-            .assets
-            .join("indexes");
+        let indexes_dir =
+            self.paths.assets.join("indexes");
 
         fs::create_dir_all(&indexes_dir).await?;
 
-        let asset_index_path =
-            indexes_dir.join(format!("{asset_index_id}.json"));
+        let asset_index_path = indexes_dir.join(
+            format!("{}.json", asset_index.id),
+        );
 
-        fs::write(&asset_index_path, &asset_index_text).await?;
-
-        let asset_index: AssetIndexJson =
+        fs::write(
+            &asset_index_path,
+            &asset_index_text,
+        )
+            .await?;
+        
+        let asset_index_json: AssetIndexJson =
             serde_json::from_str(&asset_index_text)?;
+        
+        let assets_id = version_json
+            .assets
+            .as_deref()
+            .unwrap_or("");
 
-        for (_, asset) in asset_index.objects {
+        let is_pre_1_6 =
+            assets_id == "pre-1.6";
+
+        let is_virtual =
+            assets_id == "legacy";
+        
+        for (resource_path, asset) in asset_index_json.objects {
             let hash = asset.hash;
 
             let url = format!(
@@ -251,12 +281,28 @@ impl MinecraftDownloader {
                 hash
             );
 
-            let path = self
-                .paths
-                .assets
-                .join("objects")
-                .join(&hash[..2])
-                .join(&hash);
+            let path = if is_pre_1_6 {
+                self.paths
+                    .instances
+                    .join(version_id)
+                    .join("minecraft")
+                    .join("resources")
+                    .join(&resource_path)
+
+            } else if is_virtual {
+                self.paths
+                    .assets
+                    .join("virtual")
+                    .join("legacy")
+                    .join(&resource_path)
+
+            } else {
+                self.paths
+                    .assets
+                    .join("objects")
+                    .join(&hash[..2])
+                    .join(&hash)
+            };
 
             tasks.push(DownloadTask {
                 url,
@@ -264,7 +310,6 @@ impl MinecraftDownloader {
                 sha1: Some(hash),
             });
         }
-
         let mut filtered = Vec::new();
 
         for task in tasks {
@@ -291,7 +336,7 @@ impl MinecraftDownloader {
         let results = stream::iter(tasks)
             .map(|task| {
                 let semaphore = semaphore.clone();
-                let this = self.clone();
+                let this = self;
 
                 async move {
                     let _permit = semaphore.acquire().await.unwrap();
@@ -428,13 +473,6 @@ impl MinecraftDownloader {
     }
 }
 
-#[derive(Clone)]
-struct DownloadTask {
-    url: String,
-    path: PathBuf,
-    sha1: Option<String>,
-}
-
 async fn verify_sha1(path: &Path, expected: &str) -> Result<bool> {
     let data = fs::read(path).await?;
 
@@ -458,5 +496,15 @@ async fn needs_download(task: &DownloadTask) -> bool {
         }
     } else {
         false
+    }
+}
+
+fn download_task(artifact: &Artifact, paths: Paths) -> DownloadTask {
+    DownloadTask {
+        url: artifact.url.clone(),
+        path: paths
+            .libraries
+            .join(&artifact.path),
+        sha1: Some(artifact.sha1.clone()),
     }
 }
