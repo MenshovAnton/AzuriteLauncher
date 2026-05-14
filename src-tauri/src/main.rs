@@ -1,7 +1,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use directories::BaseDirs;
-
 mod launch_minecraft;
 mod minecraft_manager;
 mod path_manager;

@@ -2,6 +2,7 @@ use std::path::PathBuf;
 use crate::APP_NAME;
 
 #[derive(Clone)]
+#[allow(dead_code)]
 pub struct Paths {
     pub root: PathBuf,
     pub versions: PathBuf,
